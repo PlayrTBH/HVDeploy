@@ -113,6 +113,14 @@ def main(argv: list[str] | None = None) -> int:
     logger = logging.getLogger(__name__)
 
     try:
+        profile = api.fetch_account_profile(args.api_base_url, api_key)
+
+        username_from_api = profile.username or args.management_user
+        if not username_from_api:
+            parser.error(
+                "Unable to determine the management username from arguments or account profile."
+            )
+
         system.install_qemu_stack()
 
         registration = api.register_server(
@@ -120,13 +128,11 @@ def main(argv: list[str] | None = None) -> int:
             api_key,
             endpoint=args.api_endpoint,
             metadata=metadata,
+            username=username_from_api,
+            authorized_keys=profile.authorized_keys,
         )
 
-        username = registration.username or args.management_user
-        if not username:
-            parser.error(
-                "Unable to determine the management username from arguments or API response."
-            )
+        username = registration.username or username_from_api
 
         groups = [group.strip() for group in args.management_groups.split(",") if group.strip()]
         system.ensure_user_exists(username)

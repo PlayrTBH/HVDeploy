@@ -6,13 +6,14 @@ import logging
 import platform
 import socket
 from dataclasses import dataclass
-from typing import Dict, List, Mapping, Optional
+from typing import Dict, List, Mapping, Optional, Sequence
 
 import requests
 
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_ENDPOINT = "/v1/servers/connect"
+PROFILE_ENDPOINT = "/v1/account/profile"
 
 
 class APIClientError(RuntimeError):
@@ -26,6 +27,14 @@ class RegistrationResult:
     username: Optional[str]
     authorized_keys: List[str]
     close_other_sessions: bool
+
+
+@dataclass
+class AccountProfile:
+    """Details about the account owning an API key."""
+
+    username: Optional[str]
+    authorized_keys: List[str]
 
 
 def _build_metadata(additional: Optional[Mapping[str, object]] = None) -> Dict[str, object]:
@@ -47,20 +56,133 @@ def _build_metadata(additional: Optional[Mapping[str, object]] = None) -> Dict[s
     return metadata
 
 
+def _normalise_authorized_keys(keys: Sequence[object]) -> List[str]:
+    """Normalise and deduplicate SSH public keys while preserving order."""
+
+    deduplicated: List[str] = []
+    seen = set()
+    for item in keys:
+        key = str(item).strip()
+        if not key or key in seen:
+            continue
+        deduplicated.append(key)
+        seen.add(key)
+    return deduplicated
+
+
+def _extract_authorized_keys(payload: Mapping[str, object]) -> List[str]:
+    """Extract SSH public keys from a JSON payload."""
+
+    keys: List[str] = []
+
+    if "authorized_keys" in payload:
+        keys_field = payload["authorized_keys"]
+        if isinstance(keys_field, list):
+            keys.extend(_normalise_authorized_keys(keys_field))
+        elif isinstance(keys_field, str):
+            keys.extend(
+                line.strip() for line in keys_field.splitlines() if line.strip()
+            )
+        else:
+            LOGGER.warning(
+                "Ignoring unexpected authorized_keys value of type %s",
+                type(keys_field).__name__,
+            )
+
+    for field in ("authorized_key", "public_key"):
+        if field in payload and payload[field]:
+            key = str(payload[field]).strip()
+            if key:
+                keys.append(key)
+
+    return _normalise_authorized_keys(keys)
+
+
+def fetch_account_profile(
+    api_base_url: str,
+    api_key: str,
+    *,
+    endpoint: str = PROFILE_ENDPOINT,
+) -> AccountProfile:
+    """Retrieve the account details and SSH keys associated with ``api_key``."""
+
+    if not api_key:
+        raise ValueError("An API key is required")
+
+    url = (
+        f"{api_base_url.rstrip('/')}{endpoint}"
+        if endpoint.startswith("/")
+        else f"{api_base_url.rstrip('/')}/{endpoint}"
+    )
+
+    LOGGER.info("Fetching account profile from management API at %s", url)
+    try:
+        response = requests.get(
+            url,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=30,
+        )
+    except requests.RequestException as exc:  # pragma: no cover - network failure
+        LOGGER.error("API request to %s failed: %s", url, exc)
+        raise APIClientError("Failed to communicate with management API") from exc
+
+    if response.status_code >= 400:
+        LOGGER.error(
+            "API request failed with status %s: %s", response.status_code, response.text
+        )
+        raise APIClientError(f"API request failed with status {response.status_code}")
+
+    try:
+        payload = response.json()
+    except ValueError as exc:  # pragma: no cover - network error
+        raise APIClientError("API response was not valid JSON") from exc
+
+    if not isinstance(payload, Mapping):
+        raise APIClientError("API response payload was not a JSON object")
+
+    authorized_keys = _extract_authorized_keys(payload)
+    if not authorized_keys:
+        raise APIClientError("API response did not include any authorized keys")
+
+    username = payload.get("username") or payload.get("user")
+    LOGGER.info(
+        "Fetched account profile for %s with %d authorized key(s)",
+        username or "API key",
+        len(authorized_keys),
+    )
+    return AccountProfile(username=username, authorized_keys=authorized_keys)
+
+
 def register_server(
     api_base_url: str,
     api_key: str,
     *,
     endpoint: str = DEFAULT_ENDPOINT,
     metadata: Optional[Mapping[str, object]] = None,
+    username: Optional[str] = None,
+    authorized_keys: Optional[Sequence[object]] = None,
 ) -> RegistrationResult:
     """Register the current server with the management API."""
 
     if not api_key:
         raise ValueError("An API key is required")
 
-    url = f"{api_base_url.rstrip('/')}{endpoint}" if endpoint.startswith("/") else f"{api_base_url.rstrip('/')}/{endpoint}"
+    url = (
+        f"{api_base_url.rstrip('/')}{endpoint}"
+        if endpoint.startswith("/")
+        else f"{api_base_url.rstrip('/')}/{endpoint}"
+    )
     payload = _build_metadata(metadata)
+
+    provided_keys: List[str] = []
+    if authorized_keys is not None:
+        provided_keys = _normalise_authorized_keys(authorized_keys)
+        if not provided_keys:
+            raise APIClientError("Account profile did not include any authorized keys")
+        payload["authorized_keys"] = provided_keys
+
+    if username:
+        payload["username"] = username
 
     LOGGER.info("Registering server with management API at %s", url)
     try:
@@ -86,48 +208,21 @@ def register_server(
     if not isinstance(payload, Mapping):
         raise APIClientError("API response payload was not a JSON object")
 
-    authorized_keys: List[str] = []
-    if "authorized_keys" in payload:
-        keys_field = payload["authorized_keys"]
-        if isinstance(keys_field, list):
-            authorized_keys.extend(
-                key for key in (str(item).strip() for item in keys_field) if key
-            )
-        elif isinstance(keys_field, str):
-            authorized_keys.extend(
-                key for key in (line.strip() for line in keys_field.splitlines()) if key
-            )
-        else:
-            LOGGER.warning(
-                "Ignoring unexpected authorized_keys value of type %s", type(keys_field).__name__
-            )
-    if "authorized_key" in payload and payload["authorized_key"]:
-        key = str(payload["authorized_key"]).strip()
-        if key:
-            authorized_keys.append(key)
-    if "public_key" in payload and payload["public_key"]:
-        key = str(payload["public_key"]).strip()
-        if key:
-            authorized_keys.append(key)
-
-    # Remove duplicates while preserving order.
-    deduplicated_keys: List[str] = []
-    seen = set()
-    for key in authorized_keys:
-        if key not in seen:
-            deduplicated_keys.append(key)
-            seen.add(key)
-    authorized_keys = deduplicated_keys
-
-    username = payload.get("username") or payload.get("user")
-    close_other_sessions = bool(payload.get("close_other_sessions", True))
-
-    if not authorized_keys:
+    response_keys = _extract_authorized_keys(payload)
+    resolved_keys = provided_keys or response_keys
+    if not resolved_keys:
         raise APIClientError("API response did not include any authorized keys")
 
-    LOGGER.info("Received %d authorized key(s) from management API", len(authorized_keys))
+    response_username = payload.get("username") or payload.get("user")
+    resolved_username = response_username or username
+    close_other_sessions = bool(payload.get("close_other_sessions", True))
+
+    LOGGER.info(
+        "Received registration response with %d authorized key(s)",
+        len(resolved_keys),
+    )
     return RegistrationResult(
-        username=username,
-        authorized_keys=authorized_keys,
+        username=resolved_username,
+        authorized_keys=resolved_keys,
         close_other_sessions=close_other_sessions,
     )
