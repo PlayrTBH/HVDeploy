@@ -6,9 +6,10 @@ following tasks:
 
 * Installs QEMU/KVM, libvirt and the supporting tooling required to host
   virtual machines.
-* Registers the server with the HVDeploy management API using an API key.  The
-  API response is expected to provide the SSH public key(s) that should be
-  authorised for management access.
+* Queries the management API for the account that owns the API key and retrieves
+  the SSH public keys that should be authorised for management access.
+* Registers the server with the HVDeploy management API using the resolved
+  account identity and authorised keys.
 * Creates (or reuses) a privileged management user, provisions the authorized
   keys returned by the API, locks the account password and enables
   passwordless sudo.
@@ -75,13 +76,20 @@ full sudo privileges.
 
 ## Notes on API Integration
 
-The agent expects the HVDeploy API to return a JSON payload containing one or
-more SSH public keys (under the `authorized_keys`, `authorized_key` or
-`public_key` fields).  Optional fields recognised by the agent include:
+When invoked the agent performs a two-step handshake with the HVDeploy API:
+
+1. `GET /v1/account/profile` using the supplied API key to determine the owning
+   account and retrieve the SSH public keys that should be provisioned on the
+   host.
+2. `POST /v1/servers/connect` to register the current server, including the
+   metadata gathered locally alongside the username/keys retrieved in step 1.
+
+The registration response may optionally include overrides recognised by the
+agent:
 
 * `username`: Overrides the CLI/default management username.
 * `close_other_sessions`: When `true` (default) the agent attempts to terminate
   other SSH connections after configuration.
 
-If the API does not return any SSH keys the agent aborts without modifying the
-system to avoid locking administrators out of the server.
+If either API call does not return any SSH keys the agent aborts without
+modifying the system to avoid locking administrators out of the server.
