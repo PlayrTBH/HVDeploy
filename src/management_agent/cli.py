@@ -133,6 +133,7 @@ def main(argv: list[str] | None = None) -> int:
         system.ensure_user_groups(username, groups)
         system.ensure_authorized_keys(username, registration.authorized_keys)
         system.ensure_passwordless_sudo(username)
+        system.lock_user_password(username)
 
         ssh.configure_sshd(username)
 

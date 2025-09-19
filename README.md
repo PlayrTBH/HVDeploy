@@ -10,7 +10,8 @@ following tasks:
   API response is expected to provide the SSH public key(s) that should be
   authorised for management access.
 * Creates (or reuses) a privileged management user, provisions the authorized
-  keys returned by the API and enables passwordless sudo.
+  keys returned by the API, locks the account password and enables
+  passwordless sudo.
 * Hardens the OpenSSH daemon to only allow public-key authentication, disables
   direct root logins and (optionally) terminates any other active SSH sessions.
 
