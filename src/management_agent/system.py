@@ -122,6 +122,25 @@ def ensure_user_groups(username: str, groups: Iterable[str]) -> None:
     ])
 
 
+def lock_user_password(username: str) -> None:
+    """Ensure the password for *username* is locked for SSH hardening."""
+
+    status = run_command(
+        ["passwd", "-S", username],
+        capture_output=True,
+        check=False,
+    )
+
+    if status.returncode == 0:
+        parts = status.stdout.split()
+        if len(parts) >= 2 and parts[1] == "L":
+            LOGGER.debug("Password for %s already locked", username)
+            return
+
+    LOGGER.info("Locking password for %s to enforce key-based authentication", username)
+    run_command(["passwd", "-l", username])
+
+
 def ensure_authorized_keys(username: str, keys: Sequence[str]) -> Path:
     """Write *keys* to the user's ``authorized_keys`` file.
 
