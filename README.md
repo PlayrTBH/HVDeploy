@@ -32,7 +32,7 @@ Install the agent with a single command (requires `sudo` and an internet
 connection):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/HVDeploy/HVDeploy/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/PlayrTBH/HVDeploy/main/install.sh | sudo bash
 ```
 
 The installer bootstraps Python tooling via `apt`, installs the latest version

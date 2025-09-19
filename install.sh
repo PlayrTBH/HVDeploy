@@ -39,7 +39,7 @@ then
 fi
 
 PACKAGE_BRANCH=${HVDEPLOY_BRANCH:-main}
-PACKAGE_URL=${HVDEPLOY_PACKAGE_URL:-https://github.com/HVDeploy/HVDeploy/archive/refs/heads/${PACKAGE_BRANCH}.tar.gz}
+PACKAGE_URL=${HVDEPLOY_PACKAGE_URL:-https://github.com/PlayrTBH/HVDeploy/archive/refs/heads/${PACKAGE_BRANCH}.tar.gz}
 PACKAGE_SPEC="hvdeploy-management-agent @ ${PACKAGE_URL}"
 
 PIP_INSTALL=(python3 -m pip install --upgrade)
