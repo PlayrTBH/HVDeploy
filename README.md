@@ -27,14 +27,22 @@ iterations, remote virtual machine lifecycle operations.
 
 ## Installation
 
-Clone the repository to the target host and install the Python package:
+Install the agent with a single command (requires `sudo` and an internet
+connection):
 
 ```bash
-pip install .
+curl -fsSL https://raw.githubusercontent.com/HVDeploy/HVDeploy/main/install.sh | sudo bash
 ```
 
-This exposes an `hvdeploy-agent` command line entry point.  Alternatively, the
-script can be executed directly via `python -m management_agent.cli`.
+The installer bootstraps Python tooling via `apt`, installs the latest version
+of the agent from the public repository and exposes the `hvdeploy-agent`
+command line entry point.  The branch can be overridden with the
+`HVDEPLOY_BRANCH` environment variable, and `HVDEPLOY_PACKAGE_URL` may be set to
+install from a specific tarball or release.
+
+To install manually instead of using the helper script, clone the repository on
+the target host and run `pip install .` from the project root.  The script can
+also be executed directly via `python -m management_agent.cli`.
 
 ## Usage
 
