@@ -52,7 +52,9 @@ def run_command(
 
 
 APT_PACKAGES = [
-    "qemu",
+    "qemu-system",
+    "qemu-system-x86",
+    "qemu-utils",
     "qemu-kvm",
     "libvirt-daemon-system",
     "libvirt-clients",
