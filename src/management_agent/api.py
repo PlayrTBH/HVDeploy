@@ -63,12 +63,16 @@ def register_server(
     payload = _build_metadata(metadata)
 
     LOGGER.info("Registering server with management API at %s", url)
-    response = requests.post(
-        url,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        data=json.dumps(payload),
-        timeout=30,
-    )
+    try:
+        response = requests.post(
+            url,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            data=json.dumps(payload),
+            timeout=30,
+        )
+    except requests.RequestException as exc:  # pragma: no cover - network failure
+        LOGGER.error("API request to %s failed: %s", url, exc)
+        raise APIClientError("Failed to communicate with management API") from exc
 
     if response.status_code >= 400:
         LOGGER.error("API request failed with status %s: %s", response.status_code, response.text)
@@ -79,13 +83,41 @@ def register_server(
     except ValueError as exc:  # pragma: no cover - network error
         raise APIClientError("API response was not valid JSON") from exc
 
+    if not isinstance(payload, Mapping):
+        raise APIClientError("API response payload was not a JSON object")
+
     authorized_keys: List[str] = []
-    if "authorized_keys" in payload and isinstance(payload["authorized_keys"], list):
-        authorized_keys.extend(str(item) for item in payload["authorized_keys"] if item)
+    if "authorized_keys" in payload:
+        keys_field = payload["authorized_keys"]
+        if isinstance(keys_field, list):
+            authorized_keys.extend(
+                key for key in (str(item).strip() for item in keys_field) if key
+            )
+        elif isinstance(keys_field, str):
+            authorized_keys.extend(
+                key for key in (line.strip() for line in keys_field.splitlines()) if key
+            )
+        else:
+            LOGGER.warning(
+                "Ignoring unexpected authorized_keys value of type %s", type(keys_field).__name__
+            )
     if "authorized_key" in payload and payload["authorized_key"]:
-        authorized_keys.append(str(payload["authorized_key"]))
+        key = str(payload["authorized_key"]).strip()
+        if key:
+            authorized_keys.append(key)
     if "public_key" in payload and payload["public_key"]:
-        authorized_keys.append(str(payload["public_key"]))
+        key = str(payload["public_key"]).strip()
+        if key:
+            authorized_keys.append(key)
+
+    # Remove duplicates while preserving order.
+    deduplicated_keys: List[str] = []
+    seen = set()
+    for key in authorized_keys:
+        if key not in seen:
+            deduplicated_keys.append(key)
+            seen.add(key)
+    authorized_keys = deduplicated_keys
 
     username = payload.get("username") or payload.get("user")
     close_other_sessions = bool(payload.get("close_other_sessions", True))

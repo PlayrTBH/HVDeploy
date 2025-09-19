@@ -137,6 +137,7 @@ def ensure_authorized_keys(username: str, keys: Sequence[str]) -> Path:
     user_info = pwd.getpwnam(username)
     ssh_dir = Path(user_info.pw_dir) / ".ssh"
     ssh_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(ssh_dir, 0o700)
     os.chown(ssh_dir, user_info.pw_uid, user_info.pw_gid)
 
     authorized_keys = ssh_dir / "authorized_keys"
