@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hvdeploy-management-agent"
+version = "0.1.0"
+description = "Agent to bootstrap an Ubuntu host for HVDeploy remote management"
+authors = [{name = "HVDeploy"}]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31.0",
+]
+
+[project.scripts]
+hvdeploy-agent = "management_agent.cli:main"
