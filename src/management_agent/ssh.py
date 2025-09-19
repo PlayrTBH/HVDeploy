@@ -23,6 +23,22 @@ def _normalise_directive(directive: str) -> str:
     return directive.strip().lower()
 
 
+def _parse_directive_line(line: str) -> tuple[str, list[str], str]:
+    """Split a configuration *line* into indentation, tokens and comment."""
+
+    leading_whitespace = line[: len(line) - len(line.lstrip())]
+    remainder = line[len(leading_whitespace) :]
+    comment = ""
+
+    if "#" in remainder:
+        hash_index = remainder.find("#")
+        comment = remainder[hash_index:]
+        remainder = remainder[:hash_index]
+
+    tokens = remainder.split()
+    return leading_whitespace, tokens, comment.strip()
+
+
 def _set_directive(path: Path, directive: str, value: str) -> bool:
     """Ensure *directive* in *path* is set to *value*.
 
@@ -84,14 +100,24 @@ def _ensure_allow_users(path: Path, username: str) -> bool:
             new_lines.append(line)
             continue
 
-        parts = stripped.split()
-        if parts and _normalise_directive(parts[0]) == directive_key:
+        leading_ws, tokens, comment = _parse_directive_line(line)
+        if not tokens:
+            new_lines.append(line)
+            continue
+
+        if _normalise_directive(tokens[0]) == directive_key:
             directive_found = True
-            users = parts[1:]
-            if username not in users:
-                users.append(username)
-                modified = True
-            new_lines.append(f"AllowUsers {' '.join(users)}")
+            users = tokens[1:]
+            if username in users:
+                new_lines.append(line)
+                continue
+
+            users.append(username)
+            modified = True
+            comment_suffix = f" {comment}" if comment else ""
+            new_lines.append(
+                f"{leading_ws}AllowUsers {' '.join(users)}{comment_suffix}"
+            )
             continue
         new_lines.append(line)
 
