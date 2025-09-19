@@ -1,4 +1,4 @@
-# HVDeploy Management Agent
+# HVDeploy Management Agent (Assume this is garbage, do not use)
 
 This repository contains a small bootstrap agent that prepares an Ubuntu 24.04
 host for management by the HVDeploy control plane.  The agent performs the
