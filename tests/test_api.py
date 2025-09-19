@@ -68,6 +68,26 @@ def test_register_server_prefers_provided_profile_data(monkeypatch: pytest.Monke
     assert result.close_other_sessions is False
 
 
+def test_register_server_includes_public_ip_and_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured_payload: Dict[str, Any] = {}
+
+    def fake_post(url: str, *, headers: Dict[str, str], data: str, timeout: int) -> _DummyResponse:  # type: ignore[override]
+        captured_payload.update(json.loads(data))
+        return _DummyResponse(200, {"authorized_keys": ["ssh-ed25519 BBB"]})
+
+    monkeypatch.setattr(api.requests, "post", fake_post)
+    monkeypatch.setattr(api, "_determine_public_ip", lambda: "203.0.113.42")
+
+    api.register_server(
+        "https://example.com",
+        "secret",
+        authorized_keys=["ssh-ed25519 BBB"],
+    )
+
+    assert captured_payload["ip_address"] == "203.0.113.42"
+    assert captured_payload["ssh_port"] == 22
+
+
 def test_register_server_requires_authorized_keys_when_profile_empty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

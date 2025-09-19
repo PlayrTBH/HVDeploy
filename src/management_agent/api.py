@@ -5,6 +5,7 @@ import json
 import logging
 import platform
 import socket
+import ipaddress
 from dataclasses import dataclass
 from typing import Dict, List, Mapping, Optional, Sequence
 
@@ -37,19 +38,62 @@ class AccountProfile:
     authorized_keys: List[str]
 
 
+def _determine_public_ip() -> Optional[str]:
+    """Attempt to determine the public IPv4 address for this host."""
+
+    ip_sources = (
+        "https://api.ipify.org",
+        "https://ifconfig.me/ip",
+        "https://checkip.amazonaws.com",
+    )
+
+    for source in ip_sources:
+        try:
+            response = requests.get(source, timeout=5)
+        except requests.RequestException:
+            LOGGER.debug("Failed to fetch public IP from %s", source, exc_info=True)
+            continue
+
+        if response.status_code >= 400:
+            LOGGER.debug(
+                "Ignoring non-success status %s when querying %s",
+                response.status_code,
+                source,
+            )
+            continue
+
+        candidate = response.text.strip()
+        try:
+            ip = ipaddress.ip_address(candidate)
+        except ValueError:
+            LOGGER.debug("Received invalid IP address '%s' from %s", candidate, source)
+            continue
+
+        if isinstance(ip, ipaddress.IPv4Address):
+            return str(ip)
+
+    return None
+
+
 def _build_metadata(additional: Optional[Mapping[str, object]] = None) -> Dict[str, object]:
     metadata: Dict[str, object] = {
         "hostname": platform.node(),
         "platform": platform.platform(),
+        "ssh_port": 22,
     }
 
-    # Best effort attempt at determining the primary IPv4 address.
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            sock.connect(("8.8.8.8", 80))
-            metadata["ip_address"] = sock.getsockname()[0]
-    except OSError:
-        LOGGER.debug("Unable to determine primary IP address", exc_info=True)
+    public_ip = _determine_public_ip()
+    if public_ip:
+        metadata["ip_address"] = public_ip
+    else:
+        # Best effort attempt at determining the primary IPv4 address as a
+        # fallback in case we are unable to reach a public IP service.
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.connect(("8.8.8.8", 80))
+                metadata["ip_address"] = sock.getsockname()[0]
+        except OSError:
+            LOGGER.debug("Unable to determine primary IP address", exc_info=True)
 
     if additional:
         metadata.update(additional)
