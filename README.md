@@ -37,9 +37,11 @@ curl -fsSL https://raw.githubusercontent.com/PlayrTBH/HVDeploy/main/install.sh |
 
 The installer bootstraps Python tooling via `apt`, installs the latest version
 of the agent from the public repository and exposes the `hvdeploy-agent`
-command line entry point.  The branch can be overridden with the
-`HVDEPLOY_BRANCH` environment variable, and `HVDEPLOY_PACKAGE_URL` may be set to
-install from a specific tarball or release.
+command line entry point.  After the API key is validated the installer
+automatically runs the agent using that key so no additional manual command is
+required.  The branch can be overridden with the `HVDEPLOY_BRANCH` environment
+variable, and `HVDEPLOY_PACKAGE_URL` may be set to install from a specific
+tarball or release.
 
 During installation the script prompts for an HVDeploy API key and validates it
 against the management API.  Leaving the prompt blank, providing an invalid key
