@@ -41,6 +41,11 @@ command line entry point.  The branch can be overridden with the
 `HVDEPLOY_BRANCH` environment variable, and `HVDEPLOY_PACKAGE_URL` may be set to
 install from a specific tarball or release.
 
+During installation the script prompts for an HVDeploy API key and validates it
+against the management API.  Leaving the prompt blank, providing an invalid key
+or running in a non-interactive environment without the `HVDEPLOY_API_KEY`
+environment variable set will abort the installation.
+
 To install manually instead of using the helper script, clone the repository on
 the target host and run `pip install .` from the project root.  The script can
 also be executed directly via `python -m management_agent.cli`.
