@@ -5,6 +5,194 @@ log() {
     printf '[hvdeploy-installer] %s\n' "$*"
 }
 
+DEFAULT_API_BASE_URL="https://api.playrservers.com"
+INSTALL_API_BASE_URL="${HVDEPLOY_API_BASE_URL:-$DEFAULT_API_BASE_URL}"
+HVDEPLOY_INSTALL_API_KEY="${HVDEPLOY_API_KEY:-}"
+
+prompt_for_api_key() {
+    if [[ -n "$HVDEPLOY_INSTALL_API_KEY" ]]; then
+        return
+    fi
+
+    log "An HVDeploy API key is required to complete installation."
+
+    local prompt_output=""
+    local prompt_status=0
+    prompt_output="$(
+        python3 - <<'PY'
+import getpass
+import sys
+
+try:
+    key = getpass.getpass("Enter HVDeploy API key: ")
+except (EOFError, KeyboardInterrupt):
+    sys.exit(1)
+
+key = key.strip()
+if not key:
+    sys.exit(2)
+
+print(key)
+PY
+    )" || prompt_status=$?
+
+    if [[ $prompt_status -ne 0 ]]; then
+        case "$prompt_status" in
+            1)
+                log "Installation cancelled before completion."
+                ;;
+            2)
+                log "An API key must be provided to continue."
+                ;;
+            *)
+                log "Failed to read an API key (exit code $prompt_status)."
+                ;;
+        esac
+        log "Set HVDEPLOY_API_KEY in the environment to install non-interactively."
+        exit 1
+    fi
+
+    HVDEPLOY_INSTALL_API_KEY="$prompt_output"
+}
+
+validate_api_key() {
+    if [[ -z "$HVDEPLOY_INSTALL_API_KEY" ]]; then
+        log "An API key must be provided to continue."
+        exit 1
+    fi
+
+    log "Validating API key with HVDeploy management API..."
+
+    export HVDEPLOY_INSTALL_API_KEY
+    export INSTALL_API_BASE_URL
+
+    if ! python3 - <<'PY'; then
+        log "API key validation failed. Please verify the key and try again."
+        exit 1
+PY
+import json
+import os
+import sys
+from urllib import error, request
+from urllib.parse import urlparse
+
+ALLOWED_API_HOST = "api.playrservers.com"
+ALLOWED_API_PORT = 443
+PROFILE_ENDPOINT = "/v1/account/profile"
+
+api_key = os.environ.get("HVDEPLOY_INSTALL_API_KEY", "").strip()
+if not api_key:
+    print("An API key is required to continue installation.", file=sys.stderr)
+    sys.exit(2)
+
+base_url = os.environ.get("INSTALL_API_BASE_URL", "https://api.playrservers.com")
+parsed = urlparse(base_url)
+
+if parsed.scheme.lower() != "https":
+    print("Management API URL must use HTTPS.", file=sys.stderr)
+    sys.exit(3)
+
+hostname = (parsed.hostname or "").lower()
+if hostname != ALLOWED_API_HOST:
+    print(f"Management API host must be {ALLOWED_API_HOST}.", file=sys.stderr)
+    sys.exit(3)
+
+port = parsed.port
+if port not in (None, ALLOWED_API_PORT):
+    print(
+        f"Management API port must be {ALLOWED_API_PORT}.",
+        file=sys.stderr,
+    )
+    sys.exit(3)
+
+path = parsed.path.rstrip("/")
+url = f"https://{ALLOWED_API_HOST}{path}{PROFILE_ENDPOINT}"
+
+request_obj = request.Request(
+    url,
+    headers={"Authorization": f"Bearer {api_key}"},
+)
+
+try:
+    with request.urlopen(request_obj, timeout=30) as response:
+        payload_bytes = response.read()
+except error.HTTPError as exc:
+    if exc.code == 401:
+        print(
+            "The provided API key was rejected by the management API.",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"Management API returned HTTP status {exc.code}.",
+            file=sys.stderr,
+        )
+    sys.exit(4)
+except error.URLError as exc:
+    reason = getattr(exc, "reason", exc)
+    print(
+        f"Failed to contact the management API: {reason}",
+        file=sys.stderr,
+    )
+    sys.exit(5)
+except Exception as exc:  # pragma: no cover - defensive
+    print(
+        f"Unexpected error contacting the management API: {exc}",
+        file=sys.stderr,
+    )
+    sys.exit(6)
+
+try:
+    payload = json.loads(payload_bytes.decode("utf-8"))
+except Exception:  # pragma: no cover - defensive
+    print("Management API response was not valid JSON.", file=sys.stderr)
+    sys.exit(7)
+
+if not isinstance(payload, dict):
+    print("Management API response payload was not a JSON object.", file=sys.stderr)
+    sys.exit(8)
+
+def normalise_keys(values):
+    seen = set()
+    result = []
+    for value in values:
+        text = str(value).strip()
+        if text and text not in seen:
+            result.append(text)
+            seen.add(text)
+    return result
+
+keys = []
+authorized_keys = payload.get("authorized_keys")
+
+if isinstance(authorized_keys, list):
+    keys.extend(normalise_keys(authorized_keys))
+elif isinstance(authorized_keys, str):
+    keys.extend(
+        normalise_keys(
+            line for line in authorized_keys.splitlines() if line.strip()
+        )
+    )
+
+for field in ("authorized_key", "public_key"):
+    value = payload.get(field)
+    if value:
+        keys.extend(normalise_keys([value]))
+
+keys = normalise_keys(keys)
+
+if not keys:
+    print(
+        "Management API response did not include any authorized keys.",
+        file=sys.stderr,
+    )
+    sys.exit(9)
+PY
+    fi
+
+    log "API key validation succeeded."
+}
+
 if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
     log "This installer must be run as root. Try re-running with sudo."
     exit 1
@@ -37,6 +225,9 @@ then
     log "Python 3.10 or newer is required."
     exit 1
 fi
+
+prompt_for_api_key
+validate_api_key
 
 PACKAGE_BRANCH=${HVDEPLOY_BRANCH:-main}
 PACKAGE_URL=${HVDEPLOY_PACKAGE_URL:-https://github.com/PlayrTBH/HVDeploy/archive/refs/heads/${PACKAGE_BRANCH}.tar.gz}
