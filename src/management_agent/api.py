@@ -100,16 +100,24 @@ def _candidate_base_urls(api_base_url: str) -> List[str]:
         )
 
     base_path = parsed.path.rstrip("/")
-    candidates = []
+    candidates: List[str] = []
 
     def _append(path: str) -> None:
-        base = f"https://{ALLOWED_API_HOST}{path}" if path else f"https://{ALLOWED_API_HOST}"
+        normalised = path.rstrip("/")
+        base = (
+            f"https://{ALLOWED_API_HOST}{normalised}"
+            if normalised
+            else f"https://{ALLOWED_API_HOST}"
+        )
         if base not in candidates:
             candidates.append(base)
 
     _append(base_path)
 
-    if not base_path.endswith(API_PATH_SUFFIX):
+    if base_path.endswith(API_PATH_SUFFIX):
+        trimmed_path = base_path[: -len(API_PATH_SUFFIX)].rstrip("/")
+        _append(trimmed_path)
+    else:
         suffix_path = f"{base_path}{API_PATH_SUFFIX}".rstrip("/")
         _append(suffix_path)
 

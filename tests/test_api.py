@@ -35,9 +35,9 @@ def test_fetch_account_profile_returns_username_and_keys(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(api.requests, "get", fake_get)
 
-    profile = api.fetch_account_profile("https://api.playrservers.com", "secret")
+    profile = api.fetch_account_profile("https://api.playrservers.com/api", "secret")
 
-    assert called["url"] == "https://api.playrservers.com/v1/account/profile"
+    assert called["url"] == "https://api.playrservers.com/api/v1/account/profile"
     assert called["headers"] == {"Authorization": "Bearer secret"}
     assert called["timeout"] == 30
     assert profile.username == "hvdeploy"
@@ -68,6 +68,33 @@ def test_resolve_account_profile_retries_with_api_suffix(
         "https://api.playrservers.com/api/v1/account/profile",
     ]
     assert resolved_base_url == "https://api.playrservers.com/api"
+    assert profile.authorized_keys == ["ssh-ed25519 BBB"]
+
+
+def test_resolve_account_profile_retries_without_api_suffix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = []
+    responses = [
+        _DummyResponse(404),
+        _DummyResponse(200, {"authorized_keys": ["ssh-ed25519 BBB"]}),
+    ]
+
+    def fake_get(url: str, *, headers: Dict[str, str], timeout: int) -> _DummyResponse:  # type: ignore[override]
+        calls.append(url)
+        return responses.pop(0)
+
+    monkeypatch.setattr(api.requests, "get", fake_get)
+
+    profile, resolved_base_url = api.resolve_account_profile(
+        "https://api.playrservers.com/api", "secret"
+    )
+
+    assert calls == [
+        "https://api.playrservers.com/api/v1/account/profile",
+        "https://api.playrservers.com/v1/account/profile",
+    ]
+    assert resolved_base_url == "https://api.playrservers.com"
     assert profile.authorized_keys == ["ssh-ed25519 BBB"]
 
 
@@ -150,9 +177,9 @@ def test_fetch_pending_commands_returns_requests(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr(api.requests, "get", fake_get)
 
-    commands = api.fetch_pending_commands("https://api.playrservers.com", "secret")
+    commands = api.fetch_pending_commands("https://api.playrservers.com/api", "secret")
 
-    assert captured["url"] == "https://api.playrservers.com/v1/servers/commands"
+    assert captured["url"] == "https://api.playrservers.com/api/v1/servers/commands"
     assert captured["headers"] == {"Authorization": "Bearer secret"}
     assert captured["timeout"] == 30
     assert [command.identifier for command in commands] == ["cmd-1", None]

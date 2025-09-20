@@ -12,7 +12,7 @@ from . import api, system
 from .api import APIClientError
 from .system import CommandError
 
-DEFAULT_BASE_URL = "https://api.playrservers.com"
+DEFAULT_BASE_URL = "https://api.playrservers.com/api"
 DEFAULT_GROUPS = "sudo,libvirt,kvm"
 
 
