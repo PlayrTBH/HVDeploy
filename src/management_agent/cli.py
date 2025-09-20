@@ -122,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(str(exc))
 
     try:
-        api_base_url = _validate_api_base_url(args.api_base_url)
+        validated_api_base_url = _validate_api_base_url(args.api_base_url)
     except argparse.ArgumentTypeError as exc:
         parser.error(str(exc))
 
@@ -141,7 +141,9 @@ def main(argv: list[str] | None = None) -> int:
     logger = logging.getLogger(__name__)
 
     try:
-        profile = api.fetch_account_profile(api_base_url, api_key)
+        profile, resolved_api_base_url = api.resolve_account_profile(
+            validated_api_base_url, api_key
+        )
 
         username_from_api = profile.username or args.management_user
         if not username_from_api:
@@ -152,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
         system.install_qemu_stack()
 
         registration = api.register_server(
-            api_base_url,
+            resolved_api_base_url,
             api_key,
             endpoint=args.api_endpoint,
             metadata=metadata,
@@ -168,7 +170,7 @@ def main(argv: list[str] | None = None) -> int:
         system.ensure_authorized_keys(username, registration.authorized_keys)
         system.ensure_passwordless_sudo(username)
 
-        command_requests = api.fetch_pending_commands(api_base_url, api_key)
+        command_requests = api.fetch_pending_commands(resolved_api_base_url, api_key)
         if command_requests:
             logger.info(
                 "Executing %d command(s) provided by the management API",

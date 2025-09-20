@@ -7,7 +7,7 @@ import platform
 import socket
 import ipaddress
 from dataclasses import dataclass
-from typing import Dict, List, Mapping, Optional, Sequence
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
 import requests
@@ -17,6 +17,7 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_ENDPOINT = "/v1/servers/connect"
 PROFILE_ENDPOINT = "/v1/account/profile"
 COMMANDS_ENDPOINT = "/v1/servers/commands"
+API_PATH_SUFFIX = "/api"
 
 ALLOWED_API_HOST = "api.playrservers.com"
 ALLOWED_API_PORT = 443
@@ -76,6 +77,43 @@ def _build_url(api_base_url: str, endpoint: str) -> str:
     if endpoint.startswith("/"):
         return f"{base_url}{endpoint}"
     return f"{base_url}/{endpoint}"
+
+
+def _candidate_base_urls(api_base_url: str) -> List[str]:
+    """Return possible API base URLs including the legacy and /api variants."""
+
+    parsed = urlparse(api_base_url)
+
+    if parsed.scheme.lower() != "https":
+        raise APIClientError("Management API communication must use HTTPS")
+
+    hostname = (parsed.hostname or "").lower()
+    if hostname != ALLOWED_API_HOST:
+        raise APIClientError(
+            f"Management API host must be {ALLOWED_API_HOST}, not {hostname or 'blank'}"
+        )
+
+    port = parsed.port
+    if port not in (None, ALLOWED_API_PORT):
+        raise APIClientError(
+            f"Management API port must be {ALLOWED_API_PORT}, not {port}"
+        )
+
+    base_path = parsed.path.rstrip("/")
+    candidates = []
+
+    def _append(path: str) -> None:
+        base = f"https://{ALLOWED_API_HOST}{path}" if path else f"https://{ALLOWED_API_HOST}"
+        if base not in candidates:
+            candidates.append(base)
+
+    _append(base_path)
+
+    if not base_path.endswith(API_PATH_SUFFIX):
+        suffix_path = f"{base_path}{API_PATH_SUFFIX}".rstrip("/")
+        _append(suffix_path)
+
+    return candidates
 
 
 def _determine_public_ip() -> Optional[str]:
@@ -182,6 +220,84 @@ def _extract_authorized_keys(payload: Mapping[str, object]) -> List[str]:
     return _normalise_authorized_keys(keys)
 
 
+def resolve_account_profile(
+    api_base_url: str,
+    api_key: str,
+    *,
+    endpoint: str = PROFILE_ENDPOINT,
+) -> Tuple[AccountProfile, str]:
+    """Resolve the API base URL and retrieve the account profile for ``api_key``."""
+
+    if not api_key:
+        raise ValueError("An API key is required")
+
+    last_not_found_error: Optional[APIClientError] = None
+
+    for candidate_base_url in _candidate_base_urls(api_base_url):
+        url = _build_url(candidate_base_url, endpoint)
+
+        LOGGER.info(
+            "Fetching account profile from management API at %s", url
+        )
+        try:
+            response = requests.get(
+                url,
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=30,
+            )
+        except requests.RequestException as exc:  # pragma: no cover - network failure
+            LOGGER.error("API request to %s failed: %s", url, exc)
+            raise APIClientError("Failed to communicate with management API") from exc
+
+        if response.status_code == 404:
+            LOGGER.info(
+                "Account profile endpoint returned 404 at %s, trying alternate base path",
+                url,
+            )
+            last_not_found_error = APIClientError(
+                "Account profile endpoint was not found at the configured API base URL"
+            )
+            continue
+
+        if response.status_code >= 400:
+            LOGGER.error(
+                "API request failed with status %s: %s",
+                response.status_code,
+                response.text,
+            )
+            raise APIClientError(
+                f"API request failed with status {response.status_code}"
+            )
+
+        try:
+            payload = response.json()
+        except ValueError as exc:  # pragma: no cover - network error
+            raise APIClientError("API response was not valid JSON") from exc
+
+        if not isinstance(payload, Mapping):
+            raise APIClientError("API response payload was not a JSON object")
+
+        authorized_keys = _extract_authorized_keys(payload)
+        if not authorized_keys:
+            raise APIClientError("API response did not include any authorized keys")
+
+        username = payload.get("username") or payload.get("user")
+        LOGGER.info(
+            "Fetched account profile for %s with %d authorized key(s)",
+            username or "API key",
+            len(authorized_keys),
+        )
+        return (
+            AccountProfile(username=username, authorized_keys=authorized_keys),
+            candidate_base_url,
+        )
+
+    if last_not_found_error is not None:
+        raise last_not_found_error
+
+    raise APIClientError("Failed to retrieve account profile from management API")
+
+
 def fetch_account_profile(
     api_base_url: str,
     api_key: str,
@@ -190,47 +306,8 @@ def fetch_account_profile(
 ) -> AccountProfile:
     """Retrieve the account details and SSH keys associated with ``api_key``."""
 
-    if not api_key:
-        raise ValueError("An API key is required")
-
-    url = _build_url(api_base_url, endpoint)
-
-    LOGGER.info("Fetching account profile from management API at %s", url)
-    try:
-        response = requests.get(
-            url,
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=30,
-        )
-    except requests.RequestException as exc:  # pragma: no cover - network failure
-        LOGGER.error("API request to %s failed: %s", url, exc)
-        raise APIClientError("Failed to communicate with management API") from exc
-
-    if response.status_code >= 400:
-        LOGGER.error(
-            "API request failed with status %s: %s", response.status_code, response.text
-        )
-        raise APIClientError(f"API request failed with status {response.status_code}")
-
-    try:
-        payload = response.json()
-    except ValueError as exc:  # pragma: no cover - network error
-        raise APIClientError("API response was not valid JSON") from exc
-
-    if not isinstance(payload, Mapping):
-        raise APIClientError("API response payload was not a JSON object")
-
-    authorized_keys = _extract_authorized_keys(payload)
-    if not authorized_keys:
-        raise APIClientError("API response did not include any authorized keys")
-
-    username = payload.get("username") or payload.get("user")
-    LOGGER.info(
-        "Fetched account profile for %s with %d authorized key(s)",
-        username or "API key",
-        len(authorized_keys),
-    )
-    return AccountProfile(username=username, authorized_keys=authorized_keys)
+    profile, _ = resolve_account_profile(api_base_url, api_key, endpoint=endpoint)
+    return profile
 
 
 def register_server(

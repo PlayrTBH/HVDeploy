@@ -44,6 +44,33 @@ def test_fetch_account_profile_returns_username_and_keys(monkeypatch: pytest.Mon
     assert profile.authorized_keys == ["ssh-rsa AAA", "ssh-ed25519 BBB"]
 
 
+def test_resolve_account_profile_retries_with_api_suffix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = []
+    responses = [
+        _DummyResponse(404),
+        _DummyResponse(200, {"authorized_keys": ["ssh-ed25519 BBB"]}),
+    ]
+
+    def fake_get(url: str, *, headers: Dict[str, str], timeout: int) -> _DummyResponse:  # type: ignore[override]
+        calls.append(url)
+        return responses.pop(0)
+
+    monkeypatch.setattr(api.requests, "get", fake_get)
+
+    profile, resolved_base_url = api.resolve_account_profile(
+        "https://api.playrservers.com", "secret"
+    )
+
+    assert calls == [
+        "https://api.playrservers.com/v1/account/profile",
+        "https://api.playrservers.com/api/v1/account/profile",
+    ]
+    assert resolved_base_url == "https://api.playrservers.com/api"
+    assert profile.authorized_keys == ["ssh-ed25519 BBB"]
+
+
 def test_register_server_prefers_provided_profile_data(monkeypatch: pytest.MonkeyPatch) -> None:
     captured_payload: Dict[str, Any] = {}
 
