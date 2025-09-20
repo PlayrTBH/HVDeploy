@@ -26,19 +26,56 @@ prompt_for_api_key() {
 import sys
 
 PREFIX = "[hvdeploy-installer]"
+_PROMPT_STREAM = None
 
 
 def log(message):
     print(f"{PREFIX} {message}", file=sys.stderr)
 
 
+def _get_prompt_stream():
+    global _PROMPT_STREAM
+
+    if _PROMPT_STREAM is not None:
+        return _PROMPT_STREAM
+
+    stream = sys.stdin
+    try:
+        is_tty = stream.isatty()
+    except Exception:
+        is_tty = False
+
+    if not is_tty:
+        encoding = getattr(stream, "encoding", None) or "utf-8"
+        try:
+            stream = open("/dev/tty", "r", encoding=encoding, errors="replace")
+        except OSError:
+            stream = sys.stdin
+
+    _PROMPT_STREAM = stream
+    return stream
+
+
 def prompt(message):
     sys.stderr.write(f"{PREFIX} {message}")
     sys.stderr.flush()
+
+    stream = _get_prompt_stream()
+
     try:
-        return input()
-    except (EOFError, KeyboardInterrupt):
+        line = stream.readline()
+    except KeyboardInterrupt:
         sys.exit(1)
+
+    if not line:
+        sys.exit(1)
+
+    if line.endswith('\n'):
+        line = line[:-1]
+        if line.endswith('\r'):
+            line = line[:-1]
+
+    return line
 
 
 while True:
