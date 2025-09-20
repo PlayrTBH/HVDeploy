@@ -90,6 +90,21 @@ def test_cli_fetches_profile_before_registration(monkeypatch: pytest.MonkeyPatch
         lambda username: record("ensure_passwordless_sudo", username) or Path("/tmp/sudoers"),
     )
     monkeypatch.setattr(
+        cli.ssh,
+        "configure_sshd",
+        lambda username: record("configure_sshd", username),
+    )
+    monkeypatch.setattr(
+        cli.ssh,
+        "restart_ssh_service",
+        lambda: record("restart_ssh_service"),
+    )
+    monkeypatch.setattr(
+        cli.ssh,
+        "close_other_ssh_sessions",
+        lambda: record("close_other_ssh_sessions"),
+    )
+    monkeypatch.setattr(
         cli.system,
         "lock_user_password",
         lambda username: record("lock_user_password", username),
@@ -123,6 +138,9 @@ def test_cli_fetches_profile_before_registration(monkeypatch: pytest.MonkeyPatch
     assert actions.index("fetch_pending_commands") > actions.index("register_server")
     command_calls = [entry for entry in call_sequence if entry[0] == "run_command_as_user"]
     assert command_calls
+    assert "configure_sshd" in actions
+    assert "restart_ssh_service" in actions
+    assert "close_other_ssh_sessions" in actions
     first_command_args = command_calls[0][1]
     assert first_command_args[0] == "hvdeploy"
     assert first_command_args[1] == "uptime"
@@ -133,3 +151,77 @@ def test_cli_rejects_non_default_api_host(monkeypatch: pytest.MonkeyPatch) -> No
 
     with pytest.raises(SystemExit):
         cli.main(["--api-key", "secret", "--api-base-url", "https://example.com"])
+
+
+def test_cli_skip_close_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cli.os, "geteuid", lambda: 0)
+
+    call_sequence: List[Tuple[str, Tuple[Any, ...], Dict[str, Any]]] = []
+
+    def record(action: str, *args: Any, **kwargs: Any) -> None:
+        call_sequence.append((action, args, kwargs))
+
+    profile = api.AccountProfile(username="hvdeploy", authorized_keys=["ssh-ed25519 AAA"])
+    monkeypatch.setattr(
+        api,
+        "resolve_account_profile",
+        lambda base_url, api_key: (profile, "https://api.playrservers.com/api"),
+    )
+
+    registration = api.RegistrationResult(
+        username="hvdeploy",
+        authorized_keys=["ssh-ed25519 AAA"],
+        close_other_sessions=True,
+    )
+    monkeypatch.setattr(
+        api,
+        "register_server",
+        lambda base_url, api_key, *, endpoint, metadata, username, authorized_keys: registration,
+    )
+    monkeypatch.setattr(api, "fetch_pending_commands", lambda base_url, api_key: [])
+
+    monkeypatch.setattr(cli.system, "install_qemu_stack", lambda: record("install_qemu_stack"))
+    monkeypatch.setattr(
+        cli.system, "ensure_user_exists", lambda username: record("ensure_user_exists", username)
+    )
+    monkeypatch.setattr(
+        cli.system,
+        "ensure_user_groups",
+        lambda username, groups: record("ensure_user_groups", username, tuple(groups)),
+    )
+    monkeypatch.setattr(
+        cli.system,
+        "ensure_authorized_keys",
+        lambda username, keys: record("ensure_authorized_keys", username, tuple(keys))
+        or Path("/tmp/authorized_keys"),
+    )
+    monkeypatch.setattr(
+        cli.system,
+        "ensure_passwordless_sudo",
+        lambda username: record("ensure_passwordless_sudo", username) or Path("/tmp/sudoers"),
+    )
+    monkeypatch.setattr(
+        cli.ssh,
+        "configure_sshd",
+        lambda username: record("configure_sshd", username),
+    )
+    monkeypatch.setattr(
+        cli.ssh,
+        "restart_ssh_service",
+        lambda: record("restart_ssh_service"),
+    )
+
+    close_calls: List[Tuple[str, Tuple[Any, ...], Dict[str, Any]]] = []
+
+    def track_close() -> None:
+        close_calls.append(("close_other_ssh_sessions", tuple(), {}))
+
+    monkeypatch.setattr(cli.ssh, "close_other_ssh_sessions", track_close)
+
+    exit_code = cli.main(["--api-key", "secret", "--skip-close-sessions"])
+
+    assert exit_code == 0
+    actions = [entry[0] for entry in call_sequence]
+    assert "configure_sshd" in actions
+    assert "restart_ssh_service" in actions
+    assert not close_calls
