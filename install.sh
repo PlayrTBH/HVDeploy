@@ -5,7 +5,7 @@ log() {
     printf '[hvdeploy-installer] %s\n' "$*"
 }
 
-DEFAULT_API_BASE_URL="https://api.playrservers.com"
+DEFAULT_API_BASE_URL="https://api.playrservers.com/api"
 INSTALL_API_BASE_URL="${HVDEPLOY_API_BASE_URL:-$DEFAULT_API_BASE_URL}"
 HVDEPLOY_INSTALL_API_KEY="${HVDEPLOY_API_KEY:-}"
 
@@ -146,7 +146,7 @@ if not api_key:
     print("An API key is required to continue installation.", file=sys.stderr)
     sys.exit(2)
 
-base_url = os.environ.get("INSTALL_API_BASE_URL", "https://api.playrservers.com")
+base_url = os.environ.get("INSTALL_API_BASE_URL", "https://api.playrservers.com/api")
 parsed = urlparse(base_url)
 
 if parsed.scheme.lower() != "https":
@@ -167,9 +167,21 @@ if port not in (None, ALLOWED_API_PORT):
     sys.exit(3)
 
 base_path = parsed.path.rstrip("/")
-candidate_paths = [base_path]
-if not base_path.endswith(API_SUFFIX):
-    candidate_paths.append(f"{base_path}{API_SUFFIX}".rstrip("/"))
+candidate_paths: list[str] = []
+
+def append_path(path: str) -> None:
+    normalised = path.rstrip("/")
+    if normalised not in candidate_paths:
+        candidate_paths.append(normalised)
+
+append_path(base_path)
+
+if base_path.endswith(API_SUFFIX):
+    trimmed_path = base_path[: -len(API_SUFFIX)].rstrip("/")
+    append_path(trimmed_path)
+else:
+    suffix_path = f"{base_path}{API_SUFFIX}".rstrip("/")
+    append_path(suffix_path)
 
 candidate_base_urls = []
 for path in candidate_paths:

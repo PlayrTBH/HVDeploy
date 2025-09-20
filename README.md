@@ -63,7 +63,7 @@ sudo hvdeploy-agent --api-key YOUR_API_KEY_HERE
 The API key can also be supplied through the `HVDEPLOY_API_KEY` environment
 variable.  Additional options include:
 
-* `--api-base-url`: Override the default API base (`https://api.playrservers.com`).
+* `--api-base-url`: Override the default API base (`https://api.playrservers.com/api`).
 * `--api-endpoint`: Change the endpoint path used for registration
   (`/v1/servers/connect` by default).
 * `--management-user`: Specify the management account to configure (defaults to
@@ -89,6 +89,10 @@ When invoked the agent performs a two-step handshake with the HVDeploy API:
    host.
 2. `POST /v1/servers/connect` to register the current server, including the
    metadata gathered locally alongside the username/keys retrieved in step 1.
+
+By default the agent targets `https://api.playrservers.com/api`, matching the
+management interface's `/api` mount point, and automatically falls back to the
+legacy base URL if required.
 
 The registration response may optionally include overrides recognised by the
 agent:
