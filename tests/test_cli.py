@@ -50,6 +50,15 @@ def test_cli_fetches_profile_before_registration(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(api, "fetch_account_profile", fake_fetch_account_profile)
     monkeypatch.setattr(api, "register_server", fake_register_server)
 
+    def fake_fetch_pending_commands(base_url: str, api_key: str) -> List[api.CommandRequest]:
+        record("fetch_pending_commands", base_url, api_key)
+        return [
+            api.CommandRequest(identifier="cmd-1", command="uptime"),
+            api.CommandRequest(identifier=None, command="echo hello"),
+        ]
+
+    monkeypatch.setattr(api, "fetch_pending_commands", fake_fetch_pending_commands)
+
     monkeypatch.setattr(
         cli.system,
         "install_qemu_stack",
@@ -80,21 +89,13 @@ def test_cli_fetches_profile_before_registration(monkeypatch: pytest.MonkeyPatch
         "lock_user_password",
         lambda username: record("lock_user_password", username),
     )
-
     monkeypatch.setattr(
-        cli.ssh,
-        "configure_sshd",
-        lambda username: record("configure_sshd", username),
-    )
-    monkeypatch.setattr(
-        cli.ssh,
-        "close_other_ssh_sessions",
-        lambda: record("close_other_ssh_sessions"),
-    )
-    monkeypatch.setattr(
-        cli.ssh,
-        "restart_ssh_service",
-        lambda: record("restart_ssh_service") or "ssh",
+        cli.system,
+        "run_command_as_user",
+        lambda username, command, **kwargs: record(
+            "run_command_as_user", username, command, kwargs
+        )
+        or None,
     )
 
     exit_code = cli.main(["--api-key", "secret"])
@@ -112,5 +113,17 @@ def test_cli_fetches_profile_before_registration(monkeypatch: pytest.MonkeyPatch
     assert ensure_keys_calls[0][1][0] == "hvdeploy"
     assert list(ensure_keys_calls[0][1][1]) == ["ssh-rsa AAA"]
 
-    # Verify SSH session closure was requested when allowed.
-    assert "close_other_ssh_sessions" in actions
+    # Ensure command polling and execution occurred.
+    assert actions.index("fetch_pending_commands") > actions.index("register_server")
+    command_calls = [entry for entry in call_sequence if entry[0] == "run_command_as_user"]
+    assert command_calls
+    first_command_args = command_calls[0][1]
+    assert first_command_args[0] == "hvdeploy"
+    assert first_command_args[1] == "uptime"
+
+
+def test_cli_rejects_non_default_api_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cli.os, "geteuid", lambda: 0)
+
+    with pytest.raises(SystemExit):
+        cli.main(["--api-key", "secret", "--api-base-url", "https://example.com"])

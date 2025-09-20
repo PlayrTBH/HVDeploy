@@ -8,6 +8,7 @@ import socket
 import ipaddress
 from dataclasses import dataclass
 from typing import Dict, List, Mapping, Optional, Sequence
+from urllib.parse import urlparse
 
 import requests
 
@@ -15,6 +16,10 @@ LOGGER = logging.getLogger(__name__)
 
 DEFAULT_ENDPOINT = "/v1/servers/connect"
 PROFILE_ENDPOINT = "/v1/account/profile"
+COMMANDS_ENDPOINT = "/v1/servers/commands"
+
+ALLOWED_API_HOST = "api.playrservers.com"
+ALLOWED_API_PORT = 443
 
 
 class APIClientError(RuntimeError):
@@ -36,6 +41,41 @@ class AccountProfile:
 
     username: Optional[str]
     authorized_keys: List[str]
+
+
+@dataclass
+class CommandRequest:
+    """A command provided by the management API for execution."""
+
+    identifier: Optional[str]
+    command: str
+
+
+def _build_url(api_base_url: str, endpoint: str) -> str:
+    """Construct a URL ensuring it targets the approved management host."""
+
+    parsed = urlparse(api_base_url)
+    if parsed.scheme.lower() != "https":
+        raise APIClientError("Management API communication must use HTTPS")
+
+    hostname = (parsed.hostname or "").lower()
+    if hostname != ALLOWED_API_HOST:
+        raise APIClientError(
+            f"Management API host must be {ALLOWED_API_HOST}, not {hostname or 'blank'}"
+        )
+
+    port = parsed.port
+    if port not in (None, ALLOWED_API_PORT):
+        raise APIClientError(
+            f"Management API port must be {ALLOWED_API_PORT}, not {port}"
+        )
+
+    base_path = parsed.path.rstrip("/")
+    base_url = f"https://{ALLOWED_API_HOST}{base_path}"
+
+    if endpoint.startswith("/"):
+        return f"{base_url}{endpoint}"
+    return f"{base_url}/{endpoint}"
 
 
 def _determine_public_ip() -> Optional[str]:
@@ -153,11 +193,7 @@ def fetch_account_profile(
     if not api_key:
         raise ValueError("An API key is required")
 
-    url = (
-        f"{api_base_url.rstrip('/')}{endpoint}"
-        if endpoint.startswith("/")
-        else f"{api_base_url.rstrip('/')}/{endpoint}"
-    )
+    url = _build_url(api_base_url, endpoint)
 
     LOGGER.info("Fetching account profile from management API at %s", url)
     try:
@@ -211,11 +247,7 @@ def register_server(
     if not api_key:
         raise ValueError("An API key is required")
 
-    url = (
-        f"{api_base_url.rstrip('/')}{endpoint}"
-        if endpoint.startswith("/")
-        else f"{api_base_url.rstrip('/')}/{endpoint}"
-    )
+    url = _build_url(api_base_url, endpoint)
     payload = _build_metadata(metadata)
 
     provided_keys: List[str] = []
@@ -270,3 +302,69 @@ def register_server(
         authorized_keys=resolved_keys,
         close_other_sessions=close_other_sessions,
     )
+
+
+def fetch_pending_commands(
+    api_base_url: str,
+    api_key: str,
+    *,
+    endpoint: str = COMMANDS_ENDPOINT,
+) -> List[CommandRequest]:
+    """Retrieve pending command requests from the management API."""
+
+    if not api_key:
+        raise ValueError("An API key is required")
+
+    url = _build_url(api_base_url, endpoint)
+
+    LOGGER.info("Checking for pending commands at %s", url)
+    try:
+        response = requests.get(
+            url,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=30,
+        )
+    except requests.RequestException as exc:  # pragma: no cover - network failure
+        LOGGER.error("Failed to fetch commands from %s: %s", url, exc)
+        raise APIClientError("Failed to communicate with management API") from exc
+
+    if response.status_code >= 400:
+        LOGGER.error(
+            "Command polling failed with status %s: %s",
+            response.status_code,
+            response.text,
+        )
+        raise APIClientError(
+            f"API request failed with status {response.status_code}"
+        )
+
+    try:
+        payload = response.json()
+    except ValueError as exc:  # pragma: no cover - network error
+        raise APIClientError("API response was not valid JSON") from exc
+
+    if isinstance(payload, Mapping):
+        raw_commands = payload.get("commands", [])
+    else:
+        raise APIClientError("API response payload was not a JSON object")
+
+    if not isinstance(raw_commands, Sequence) or isinstance(raw_commands, (str, bytes)):
+        raise APIClientError("Commands payload was not a list")
+
+    commands: List[CommandRequest] = []
+    for entry in raw_commands:
+        if not isinstance(entry, Mapping):
+            LOGGER.warning("Ignoring malformed command entry: %r", entry)
+            continue
+
+        command_text = str(entry.get("command", "")).strip()
+        if not command_text:
+            LOGGER.warning("Ignoring command with no executable text: %r", entry)
+            continue
+
+        identifier = entry.get("id") or entry.get("identifier")
+        commands.append(
+            CommandRequest(identifier=str(identifier) if identifier else None, command=command_text)
+        )
+
+    return commands

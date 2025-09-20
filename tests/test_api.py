@@ -35,9 +35,9 @@ def test_fetch_account_profile_returns_username_and_keys(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(api.requests, "get", fake_get)
 
-    profile = api.fetch_account_profile("https://example.com", "secret")
+    profile = api.fetch_account_profile("https://api.playrservers.com", "secret")
 
-    assert called["url"] == "https://example.com/v1/account/profile"
+    assert called["url"] == "https://api.playrservers.com/v1/account/profile"
     assert called["headers"] == {"Authorization": "Bearer secret"}
     assert called["timeout"] == 30
     assert profile.username == "hvdeploy"
@@ -55,7 +55,7 @@ def test_register_server_prefers_provided_profile_data(monkeypatch: pytest.Monke
     monkeypatch.setattr(api.requests, "post", fake_post)
 
     result = api.register_server(
-        "https://example.com",
+        "https://api.playrservers.com",
         "secret",
         username="hvdeploy",
         authorized_keys=["ssh-rsa AAA", " ssh-rsa AAA ", "ssh-ed25519 BBB"],
@@ -79,7 +79,7 @@ def test_register_server_includes_public_ip_and_port(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(api, "_determine_public_ip", lambda: "203.0.113.42")
 
     api.register_server(
-        "https://example.com",
+        "https://api.playrservers.com",
         "secret",
         authorized_keys=["ssh-ed25519 BBB"],
     )
@@ -98,8 +98,40 @@ def test_register_server_requires_authorized_keys_when_profile_empty(
 
     with pytest.raises(api.APIClientError):
         api.register_server(
-            "https://example.com",
+            "https://api.playrservers.com",
             "secret",
             username="hvdeploy",
             authorized_keys=[],
         )
+
+
+def test_fetch_pending_commands_returns_requests(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: Dict[str, Any] = {}
+
+    def fake_get(url: str, *, headers: Dict[str, str], timeout: int) -> _DummyResponse:  # type: ignore[override]
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        payload = {
+            "commands": [
+                {"id": "cmd-1", "command": "uptime"},
+                {"command": " echo hello "},
+                {"id": "skip", "command": "   "},
+            ]
+        }
+        return _DummyResponse(200, payload)
+
+    monkeypatch.setattr(api.requests, "get", fake_get)
+
+    commands = api.fetch_pending_commands("https://api.playrservers.com", "secret")
+
+    assert captured["url"] == "https://api.playrservers.com/v1/servers/commands"
+    assert captured["headers"] == {"Authorization": "Bearer secret"}
+    assert captured["timeout"] == 30
+    assert [command.identifier for command in commands] == ["cmd-1", None]
+    assert [command.command for command in commands] == ["uptime", "echo hello"]
+
+
+def test_fetch_pending_commands_rejects_non_default_host() -> None:
+    with pytest.raises(api.APIClientError):
+        api.fetch_pending_commands("https://example.com", "secret")
