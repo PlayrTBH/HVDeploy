@@ -11,10 +11,9 @@ following tasks:
 * Registers the server with the HVDeploy management API using the resolved
   account identity and authorised keys.
 * Creates (or reuses) a privileged management user, provisions the authorized
-  keys returned by the API, locks the account password and enables
-  passwordless sudo.
-* Hardens the OpenSSH daemon to only allow public-key authentication, disables
-  direct root logins and (optionally) terminates any other active SSH sessions.
+  keys returned by the API and enables passwordless sudo.
+* Leaves the existing OpenSSH daemon authentication settings unchanged while
+  (optionally) terminating any other active SSH sessions.
 
 The end result is a host that is ready for remote administration and, in later
 iterations, remote virtual machine lifecycle operations.
