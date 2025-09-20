@@ -2,12 +2,61 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import List
 
 import pytest
 
 from management_agent import ssh
+
+
+def _read_directive_tokens(path: Path, directive: str) -> List[str]:
+    for line in path.read_text().splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        parts = stripped.split()
+        if parts and parts[0].lower() == directive.lower():
+            return parts[1:]
+
+    return []
+
+
+def test_configure_sshd_sets_directives_for_non_root_user(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ensure non-root users have root logins disabled and AllowUsers updated."""
+
+    config_path = tmp_path / "sshd_config"
+    config_path.write_text("PermitRootLogin yes\n")
+    monkeypatch.setattr(ssh, "SSHD_CONFIG_PATH", config_path)
+
+    ssh.configure_sshd("hvdeploy")
+
+    backup_path = config_path.with_suffix(".pre_hvdeploy")
+    assert backup_path.exists()
+
+    assert _read_directive_tokens(config_path, "PermitRootLogin") == ["no"]
+    assert "hvdeploy" in _read_directive_tokens(config_path, "AllowUsers")
+
+
+def test_configure_sshd_allows_root_key_logins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the management user is root, retain key-based root access."""
+
+    config_path = tmp_path / "sshd_config"
+    config_path.write_text("PermitRootLogin yes\n")
+    monkeypatch.setattr(ssh, "SSHD_CONFIG_PATH", config_path)
+
+    ssh.configure_sshd("root")
+
+    assert _read_directive_tokens(config_path, "PermitRootLogin") == [
+        "prohibit-password"
+    ]
+    assert _read_directive_tokens(config_path, "AllowUsers") == ["root"]
 
 
 def test_detect_current_tty_falls_back_to_env(monkeypatch: pytest.MonkeyPatch) -> None:

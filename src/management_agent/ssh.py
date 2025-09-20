@@ -141,12 +141,16 @@ def configure_sshd(username: str) -> None:
         shutil.copy2(SSHD_CONFIG_PATH, backup_path)
         LOGGER.info("Backed up SSH configuration to %s", backup_path)
 
+    permit_root_login_value = "no"
+    if username.strip().lower() == "root":
+        permit_root_login_value = "prohibit-password"
+
     changes = [
         _set_directive(SSHD_CONFIG_PATH, "PasswordAuthentication", "no"),
         _set_directive(SSHD_CONFIG_PATH, "ChallengeResponseAuthentication", "no"),
         _set_directive(SSHD_CONFIG_PATH, "KbdInteractiveAuthentication", "no"),
         _set_directive(SSHD_CONFIG_PATH, "PubkeyAuthentication", "yes"),
-        _set_directive(SSHD_CONFIG_PATH, "PermitRootLogin", "no"),
+        _set_directive(SSHD_CONFIG_PATH, "PermitRootLogin", permit_root_login_value),
         _set_directive(SSHD_CONFIG_PATH, "AuthenticationMethods", "publickey"),
         _ensure_allow_users(SSHD_CONFIG_PATH, username),
     ]
