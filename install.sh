@@ -335,4 +335,21 @@ fi
 log "Installing hvdeploy-management-agent from ${PACKAGE_URL}"
 "${PIP_INSTALL[@]}" "${PACKAGE_SPEC}"
 
-log "Installation complete. Run 'hvdeploy-agent --api-key YOUR_API_KEY' to configure this host."
+if ! command -v hvdeploy-agent >/dev/null 2>&1; then
+    log "hvdeploy-agent command could not be located after installation."
+    exit 1
+fi
+
+log "Running hvdeploy-agent to configure this host using the provided API key..."
+AGENT_COMMAND=(hvdeploy-agent "--api-key" "$HVDEPLOY_INSTALL_API_KEY")
+
+if [[ -n "${INSTALL_API_BASE_URL}" ]]; then
+    AGENT_COMMAND+=("--api-base-url" "$INSTALL_API_BASE_URL")
+fi
+
+if ! "${AGENT_COMMAND[@]}"; then
+    log "hvdeploy-agent reported a failure during configuration. Review the output above for details."
+    exit 1
+fi
+
+log "Installation and configuration complete."
