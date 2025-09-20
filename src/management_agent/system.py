@@ -181,3 +181,26 @@ def ensure_passwordless_sudo(username: str, sudoers_path: Path | None = None) ->
     os.chmod(sudoers_path, 0o440)
     LOGGER.info("Ensured passwordless sudo for %s at %s", username, sudoers_path)
     return sudoers_path
+
+
+def run_command_as_user(
+    username: str,
+    command: str,
+    *,
+    check: bool = True,
+    capture_output: bool = False,
+    text: bool = True,
+) -> subprocess.CompletedProcess:
+    """Execute *command* as *username* using ``sudo``."""
+
+    if not command or not command.strip():
+        raise ValueError("Command must be a non-empty string")
+
+    sudo_command = ["sudo", "-u", username, "bash", "-lc", command]
+    LOGGER.debug("Running command as %s: %s", username, command)
+    return run_command(
+        sudo_command,
+        check=check,
+        capture_output=capture_output,
+        text=text,
+    )
