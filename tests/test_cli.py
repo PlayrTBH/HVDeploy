@@ -18,9 +18,12 @@ def test_cli_fetches_profile_before_registration(monkeypatch: pytest.MonkeyPatch
     def record(action: str, *args: Any, **kwargs: Any) -> None:
         call_sequence.append((action, args, kwargs))
 
-    def fake_fetch_account_profile(base_url: str, api_key: str) -> api.AccountProfile:
-        record("fetch_account_profile", base_url, api_key)
-        return api.AccountProfile(username="hvdeploy", authorized_keys=["ssh-rsa AAA"])
+    def fake_resolve_account_profile(
+        base_url: str, api_key: str
+    ) -> Tuple[api.AccountProfile, str]:
+        record("resolve_account_profile", base_url, api_key)
+        profile = api.AccountProfile(username="hvdeploy", authorized_keys=["ssh-rsa AAA"])
+        return profile, "https://api.playrservers.com/api"
 
     def fake_register_server(
         base_url: str,
@@ -41,17 +44,19 @@ def test_cli_fetches_profile_before_registration(monkeypatch: pytest.MonkeyPatch
             authorized_keys=authorized_keys,
         )
         assert authorized_keys == ["ssh-rsa AAA"]
+        assert base_url == "https://api.playrservers.com/api"
         return api.RegistrationResult(
             username=username,
             authorized_keys=list(authorized_keys),
             close_other_sessions=True,
         )
 
-    monkeypatch.setattr(api, "fetch_account_profile", fake_fetch_account_profile)
+    monkeypatch.setattr(api, "resolve_account_profile", fake_resolve_account_profile)
     monkeypatch.setattr(api, "register_server", fake_register_server)
 
     def fake_fetch_pending_commands(base_url: str, api_key: str) -> List[api.CommandRequest]:
         record("fetch_pending_commands", base_url, api_key)
+        assert base_url == "https://api.playrservers.com/api"
         return [
             api.CommandRequest(identifier="cmd-1", command="uptime"),
             api.CommandRequest(identifier=None, command="echo hello"),
@@ -104,7 +109,7 @@ def test_cli_fetches_profile_before_registration(monkeypatch: pytest.MonkeyPatch
 
     actions = [entry[0] for entry in call_sequence]
     assert "lock_user_password" not in actions
-    assert actions.index("fetch_account_profile") < actions.index("register_server")
+    assert actions.index("resolve_account_profile") < actions.index("register_server")
 
     # Ensure provisioning used the resolved username and keys.
     assert ("ensure_user_exists" in actions) and ("ensure_authorized_keys" in actions)

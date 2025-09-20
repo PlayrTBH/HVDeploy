@@ -20,11 +20,10 @@ prompt_for_api_key() {
     local prompt_status=0
     prompt_output="$(
         python3 - <<'PY'
-import getpass
 import sys
 
 try:
-    key = getpass.getpass("Enter HVDeploy API key: ")
+    key = input("Enter HVDeploy API key: ")
 except (EOFError, KeyboardInterrupt):
     sys.exit(1)
 
@@ -76,6 +75,7 @@ from urllib.parse import urlparse
 ALLOWED_API_HOST = "api.playrservers.com"
 ALLOWED_API_PORT = 443
 PROFILE_ENDPOINT = "/v1/account/profile"
+API_SUFFIX = "/api"
 
 api_key = os.environ.get("HVDEPLOY_INSTALL_API_KEY", "").strip()
 if not api_key:
@@ -102,42 +102,72 @@ if port not in (None, ALLOWED_API_PORT):
     )
     sys.exit(3)
 
-path = parsed.path.rstrip("/")
-url = f"https://{ALLOWED_API_HOST}{path}{PROFILE_ENDPOINT}"
+base_path = parsed.path.rstrip("/")
+candidate_paths = [base_path]
+if not base_path.endswith(API_SUFFIX):
+    candidate_paths.append(f"{base_path}{API_SUFFIX}".rstrip("/"))
 
-request_obj = request.Request(
-    url,
-    headers={"Authorization": f"Bearer {api_key}"},
-)
+candidate_base_urls = []
+for path in candidate_paths:
+    candidate = f"https://{ALLOWED_API_HOST}{path}" if path else f"https://{ALLOWED_API_HOST}"
+    if candidate not in candidate_base_urls:
+        candidate_base_urls.append(candidate)
 
-try:
-    with request.urlopen(request_obj, timeout=30) as response:
-        payload_bytes = response.read()
-except error.HTTPError as exc:
-    if exc.code == 401:
-        print(
-            "The provided API key was rejected by the management API.",
-            file=sys.stderr,
-        )
-    else:
+payload_bytes = None
+not_found = False
+
+for candidate in candidate_base_urls:
+    url = f"{candidate}{PROFILE_ENDPOINT}"
+    request_obj = request.Request(
+        url,
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+
+    try:
+        with request.urlopen(request_obj, timeout=30) as response:
+            payload_bytes = response.read()
+            break
+    except error.HTTPError as exc:
+        if exc.code in (401, 403):
+            print(
+                "The provided API key was rejected by the management API.",
+                file=sys.stderr,
+            )
+            sys.exit(4)
+        if exc.code == 404:
+            not_found = True
+            continue
         print(
             f"Management API returned HTTP status {exc.code}.",
             file=sys.stderr,
         )
+        sys.exit(4)
+    except error.URLError as exc:
+        reason = getattr(exc, "reason", exc)
+        print(
+            f"Failed to contact the management API: {reason}",
+            file=sys.stderr,
+        )
+        sys.exit(5)
+    except Exception as exc:  # pragma: no cover - defensive
+        print(
+            f"Unexpected error contacting the management API: {exc}",
+            file=sys.stderr,
+        )
+        sys.exit(6)
+
+if payload_bytes is None:
+    if not_found:
+        print(
+            "Management API endpoint was not found. Verify the HVDEPLOY_API_BASE_URL setting.",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "Failed to retrieve a response from the management API.",
+            file=sys.stderr,
+        )
     sys.exit(4)
-except error.URLError as exc:
-    reason = getattr(exc, "reason", exc)
-    print(
-        f"Failed to contact the management API: {reason}",
-        file=sys.stderr,
-    )
-    sys.exit(5)
-except Exception as exc:  # pragma: no cover - defensive
-    print(
-        f"Unexpected error contacting the management API: {exc}",
-        file=sys.stderr,
-    )
-    sys.exit(6)
 
 try:
     payload = json.loads(payload_bytes.decode("utf-8"))
