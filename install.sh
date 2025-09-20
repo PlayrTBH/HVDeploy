@@ -66,10 +66,7 @@ validate_api_key() {
     export HVDEPLOY_INSTALL_API_KEY
     export INSTALL_API_BASE_URL
 
-    if ! python3 - <<'PY'; then
-        log "API key validation failed. Please verify the key and try again."
-        exit 1
-PY
+    if ! python3 - <<'PY'
 import json
 import os
 import sys
@@ -188,6 +185,9 @@ if not keys:
     )
     sys.exit(9)
 PY
+    then
+        log "API key validation failed. Please verify the key and try again."
+        exit 1
     fi
 
     log "API key validation succeeded."
