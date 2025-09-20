@@ -18,40 +18,67 @@ prompt_for_api_key() {
 
     local prompt_output=""
     local prompt_status=0
-    prompt_output="$(
-        python3 - <<'PY'
+
+    while true; do
+        prompt_status=0
+        prompt_output="$(
+            python3 - <<'PY'
 import sys
 
-try:
-    key = input("Enter HVDeploy API key: ")
-except (EOFError, KeyboardInterrupt):
-    sys.exit(1)
+PREFIX = "[hvdeploy-installer]"
 
-key = key.strip()
-if not key:
-    sys.exit(2)
 
-print(key)
+def log(message):
+    print(f"{PREFIX} {message}", file=sys.stderr)
+
+
+def prompt(message):
+    sys.stderr.write(f"{PREFIX} {message}")
+    sys.stderr.flush()
+    try:
+        return input()
+    except (EOFError, KeyboardInterrupt):
+        sys.exit(1)
+
+
+while True:
+    api_key = prompt("Enter HVDeploy API key: ").strip()
+    if not api_key:
+        log("An API key must be provided to continue.")
+        continue
+
+    log(f"You entered API key: {api_key}")
+
+    while True:
+        confirmation = prompt("Use this API key? [Y/n]: ").strip().lower()
+        if confirmation in ("", "y", "yes"):
+            print(api_key)
+            sys.exit(0)
+        if confirmation in ("n", "no"):
+            log("Let's try entering the API key again.")
+            break
+        log("Please respond with 'y' or 'n'.")
 PY
-    )" || prompt_status=$?
+        )" || prompt_status=$?
 
-    if [[ $prompt_status -ne 0 ]]; then
-        case "$prompt_status" in
-            1)
-                log "Installation cancelled before completion."
-                ;;
-            2)
-                log "An API key must be provided to continue."
-                ;;
-            *)
-                log "Failed to read an API key (exit code $prompt_status)."
-                ;;
-        esac
-        log "Set HVDEPLOY_API_KEY in the environment to install non-interactively."
-        exit 1
-    fi
+        if [[ $prompt_status -ne 0 ]]; then
+            case "$prompt_status" in
+                1)
+                    log "Installation cancelled before completion."
+                    ;;
+                *)
+                    log "Failed to read an API key (exit code $prompt_status)."
+                    ;;
+            esac
+            log "Set HVDEPLOY_API_KEY in the environment to install non-interactively."
+            exit 1
+        fi
 
-    HVDEPLOY_INSTALL_API_KEY="$prompt_output"
+        if [[ -n "$prompt_output" ]]; then
+            HVDEPLOY_INSTALL_API_KEY="$prompt_output"
+            break
+        fi
+    done
 }
 
 validate_api_key() {
