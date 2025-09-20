@@ -175,13 +175,33 @@ def restart_ssh_service() -> str:
     raise SSHConfigurationError("Unable to restart SSH service")
 
 
+def _detect_current_tty() -> str | None:
+    """Return the TTY for the running process or ``None`` when unavailable."""
+
+    try:
+        tty = os.ttyname(sys.stdin.fileno())
+    except (OSError, AttributeError, ValueError):
+        tty = os.environ.get("SSH_TTY")
+
+    if not tty:
+        return None
+
+    if tty.startswith("/dev/"):
+        tty = tty[5:]
+
+    return tty or None
+
+
 def close_other_ssh_sessions() -> None:
     """Terminate any SSH sessions other than the one running the agent."""
 
-    try:
-        current_tty = os.ttyname(sys.stdin.fileno()).replace("/dev/", "")
-    except OSError:
-        current_tty = None
+    current_tty = _detect_current_tty()
+
+    if current_tty is None:
+        LOGGER.warning(
+            "Cannot determine controlling TTY; skipping termination of other SSH sessions",
+        )
+        return
 
     result = run_command(["who"], capture_output=True, check=False)
     if result.returncode != 0 or not result.stdout:
