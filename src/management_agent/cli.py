@@ -167,7 +167,6 @@ def main(argv: list[str] | None = None) -> int:
         system.ensure_user_groups(username, groups)
         system.ensure_authorized_keys(username, registration.authorized_keys)
         system.ensure_passwordless_sudo(username)
-        system.lock_user_password(username)
 
         command_requests = api.fetch_pending_commands(api_base_url, api_key)
         if command_requests:

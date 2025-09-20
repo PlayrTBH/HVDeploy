@@ -103,6 +103,7 @@ def test_cli_fetches_profile_before_registration(monkeypatch: pytest.MonkeyPatch
     assert exit_code == 0
 
     actions = [entry[0] for entry in call_sequence]
+    assert "lock_user_password" not in actions
     assert actions.index("fetch_account_profile") < actions.index("register_server")
 
     # Ensure provisioning used the resolved username and keys.
