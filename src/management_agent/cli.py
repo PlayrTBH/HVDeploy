@@ -8,7 +8,7 @@ import sys
 from typing import Dict
 from urllib.parse import urlparse
 
-from . import api, system
+from . import api, ssh, system
 from .api import APIClientError
 from .system import CommandError
 
@@ -169,6 +169,18 @@ def main(argv: list[str] | None = None) -> int:
         system.ensure_user_groups(username, groups)
         system.ensure_authorized_keys(username, registration.authorized_keys)
         system.ensure_passwordless_sudo(username)
+
+        ssh.configure_sshd(username)
+        ssh.restart_ssh_service()
+
+        if registration.close_other_sessions and not args.skip_close_sessions:
+            ssh.close_other_ssh_sessions()
+        elif args.skip_close_sessions:
+            logger.info("Skipping termination of other SSH sessions per CLI flag")
+        else:
+            logger.info(
+                "Management API requested to keep other SSH sessions active"
+            )
 
         command_requests = api.fetch_pending_commands(resolved_api_base_url, api_key)
         if command_requests:
