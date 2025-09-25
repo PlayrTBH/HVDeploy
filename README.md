@@ -28,6 +28,20 @@ public/               Web root that should be exposed by Apache
 
 ## Installation
 
+### Quick install script (Debian/Ubuntu)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/HVDeploy/HVDeploy/main/install.sh | sudo bash
+```
+
+Set the `HVDEPLOY_REPO`, `HVDEPLOY_BRANCH`, or `HVDEPLOY_DIR` environment variables to customize the source repository, branch, or installation path. For example, to install from a fork located at `https://github.com/your-org/HVDeploy.git` run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/HVDeploy/HVDeploy/main/install.sh | sudo HVDEPLOY_REPO=https://github.com/your-org/HVDeploy.git bash
+```
+
+The script installs Apache, PHP, and git (via `apt-get`), checks out the application to `/opt/service-hub`, configures permissions on `data/`, and optionally provisions an Apache virtual host pointing to the `public/` directory. Override `HVDEPLOY_CONFIGURE_APACHE=0` to skip the virtual host creation.
+
 1. **Clone or copy the project to your server.**
 2. **Point Apache's `DocumentRoot` at the `public/` directory.** Example virtual host:
 
